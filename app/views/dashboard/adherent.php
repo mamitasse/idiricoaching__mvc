@@ -1,82 +1,51 @@
 <?php
-/** @var string $ym */
-/** @var string $prevYm */
-/** @var string $nextYm */
-/** @var string $selectedDate */
-/** @var array  $availability (['YYYY-MM-DD' => int]) */
-/** @var array  $availableSlots */
-/** @var array  $reservations */
-/** @var array|null $coach */
-
-function fdt(string $sqlDT): string { return (new DateTime($sqlDT))->format('d/m/Y H:i'); }
+/** Variables :
+ * @var string $userName
+ * @var string $coachName
+ * @var string $todayDate
+ * @var string $selectedDate
+ * @var array  $availableSlots
+ * @var array  $reservations
+ */
+function timeHM(string $sqlDT): string { return (new DateTime($sqlDT))->format('H:i'); }
 function dmy(string $ymd): string { return (new DateTime($ymd))->format('d/m/Y'); }
-
-$months = [1=>'Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-[$y,$m] = array_map('intval', explode('-', $ym));
-$monthTitle = $months[$m] . ' ' . $y;
-
-$first = new DateTime($ym . '-01');
-$daysInMonth = (int)$first->format('t');
-$startDow = (int)$first->format('N'); // 1=Mon..7=Sun
-$today = (new DateTime('today'))->format('Y-m-d');
 ?>
 <section class="card">
-  <div class="cal-header">
-    <a class="btn" href="<?= BASE_URL ?>?action=adherentDashboard&ym=<?= e($prevYm) ?>">←</a>
-    <h2><?= e($monthTitle) ?></h2>
-    <a class="btn" href="<?= BASE_URL ?>?action=adherentDashboard&ym=<?= e($nextYm) ?>">→</a>
-  </div>
-
-  <div class="cal-grid cal-head">
-    <div>Lu</div><div>Ma</div><div>Me</div><div>Je</div><div>Ve</div><div>Sa</div><div>Di</div>
-  </div>
-
-  <div class="cal-grid">
-    <?php for ($i=1; $i<$startDow; $i++): ?>
-      <div class="cal-day empty"></div>
-    <?php endfor; ?>
-
-    <?php for ($d=1; $d<=$daysInMonth; $d++): 
-      $day = sprintf('%s-%02d', $ym, $d);
-      $cnt = $availability[$day] ?? 0;
-      $classes = ['cal-day'];
-      if ($day === $today) $classes[] = 'today';
-      if ($day === $selectedDate) $classes[] = 'selected';
-      if ($cnt > 0) $classes[] = 'has-avail';
-      ?>
-      <a class="<?= e(implode(' ', $classes)) ?>"
-         href="<?= BASE_URL ?>?action=adherentDashboard&ym=<?= e($ym) ?>&date=<?= e($day) ?>">
-        <div class="cal-num"><?= $d ?></div>
-        <?php if ($cnt > 0): ?><div class="cal-dot" title="<?= $cnt ?> créneau(x) dispo"></div><?php endif; ?>
-      </a>
-    <?php endfor; ?>
-  </div>
+  <h1>Bonjour <?= e($userName) ?></h1>
+  <p>Nous sommes le <?= e($todayDate) ?> — Ton coach : <strong><?= e($coachName) ?></strong></p>
 </section>
 
 <section class="card">
-  <h2>Créneaux disponibles — <?= e(dmy($selectedDate)) ?><?= $coach ? ' (Coach '.e($coach['first_name'].' '.$coach['last_name']).')' : '' ?></h2>
-  <?php if (empty($availableSlots)): ?>
-    <p>Aucun créneau disponible ce jour.</p>
-  <?php else: ?>
-    <table class="table">
-      <thead><tr><th>Début</th><th>Fin</th><th></th></tr></thead>
-      <tbody>
+  <form method="get" action="" class="form" style="display:grid; grid-template-columns:1fr; gap:12px; max-width:360px;">
+    <input type="hidden" name="action" value="adherentDashboard">
+    <label>
+      Sélectionner une date
+      <input type="date" name="date" value="<?= e($selectedDate) ?>" onchange="this.form.submit()">
+    </label>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Créneaux disponibles — <?= e(dmy($selectedDate)) ?> (coach <?= e($coachName) ?>)</h2>
+
+  <div class="slots-container">
+    <?php if (empty($availableSlots)): ?>
+      <p>Aucun créneau disponible pour cette journée.</p>
+    <?php else: ?>
       <?php foreach ($availableSlots as $s): ?>
-        <tr>
-          <td><?= e(fdt($s['start_time'])) ?></td>
-          <td><?= e(fdt($s['end_time'])) ?></td>
-          <td>
-            <form method="post" action="<?= BASE_URL ?>?action=creneauReserve" class="inline">
+        <div class="slot available-slot">
+          <div class="slot-time"><?= e(timeHM($s['start_time'])) ?> - <?= e(timeHM($s['end_time'])) ?></div>
+          <div class="slot-actions">
+            <form class="inline" method="post" action="<?= BASE_URL ?>?action=creneauReserve">
               <?= csrf_input() ?>
               <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
               <button class="btn btn-primary" type="submit">Réserver</button>
             </form>
-          </td>
-        </tr>
+          </div>
+        </div>
       <?php endforeach; ?>
-      </tbody>
-    </table>
-  <?php endif; ?>
+    <?php endif; ?>
+  </div>
 </section>
 
 <section class="card">
@@ -85,14 +54,30 @@ $today = (new DateTime('today'))->format('Y-m-d');
     <p>Aucune réservation.</p>
   <?php else: ?>
     <table class="table">
-      <thead><tr><th>Début</th><th>Fin</th><th>Coach</th><th>Statut</th></tr></thead>
+      <thead><tr><th>Date</th><th>Heure</th><th>Coach</th><th>Statut</th><th></th></tr></thead>
       <tbody>
       <?php foreach ($reservations as $r): ?>
+        <?php
+          $start = new DateTime($r['start_time']);
+          $date  = $start->format('d/m/Y');
+          $heure = $start->format('H:i').' - '.(new DateTime($r['end_time']))->format('H:i');
+          $canCancel = ($start > (new DateTime())->modify('+36 hours')) && ($r['status'] !== 'cancelled');
+        ?>
         <tr>
-          <td><?= e(fdt($r['start_time'])) ?></td>
-          <td><?= e(fdt($r['end_time'])) ?></td>
+          <td><?= e($date) ?></td>
+          <td><?= e($heure) ?></td>
           <td><?= e($r['coach_first'].' '.$r['coach_last']) ?></td>
           <td><?= e($r['status']) ?><?= ((int)$r['paid']===1?' (payé)':'') ?></td>
+          <td>
+            <?php if ($canCancel): ?>
+              <form method="post" action="<?= BASE_URL ?>?action=reservationCancel" class="inline"
+                    onsubmit="return confirm('Confirmer l’annulation ?');">
+                <?= csrf_input() ?>
+                <input type="hidden" name="reservation_id" value="<?= (int)$r['id'] ?>">
+                <button class="btn" type="submit">Annuler</button>
+              </form>
+            <?php endif; ?>
+          </td>
         </tr>
       <?php endforeach; ?>
       </tbody>

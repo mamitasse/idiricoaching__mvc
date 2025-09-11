@@ -1,134 +1,131 @@
 <?php
-/** @var string $ym */
-/** @var string $prevYm */
-/** @var string $nextYm */
-/** @var string $selectedDate */
-/** @var array  $summary (['YYYY-MM-DD' => ['total'=>X,'reserved'=>Y]]) */
-/** @var array  $slots    (créneaux du jour) */
-/** @var array  $reservations */
+/** Variables passées :
+ * @var string $coachName
+ * @var string $todayDate
+ * @var string $selectedDate       YYYY-MM-DD
+ * @var array  $adherents          [{id,first_name,last_name,email}]
+ * @var int    $selectedAdh
+ * @var array  $slots              (créneaux du jour avec reserved_count, status)
+ * @var array  $reservedForAdh     (liste réservée pour l’adhérent sélectionné)
+ * @var array  $reservations       (toutes réservations — optionnel)
+ */
 
-function fdt(string $sqlDT): string { return (new DateTime($sqlDT))->format('d/m/Y H:i'); }
-function dmy(string $ymd): string { return (new DateTime($ymd))->format('d/m/Y'); }
-
-$months = [1=>'Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-[$y,$m] = array_map('intval', explode('-', $ym));
-$monthTitle = $months[$m] . ' ' . $y;
-
-$first = new DateTime($ym . '-01');
-$daysInMonth = (int)$first->format('t');
-$startDow = (int)$first->format('N');
-$today = (new DateTime('today'))->format('Y-m-d');
+function timeHM(string $sqlDT): string { return (new DateTime($sqlDT))->format('H:i'); }
 ?>
 <section class="card">
-  <div class="cal-header">
-    <a class="btn" href="<?= BASE_URL ?>?action=coachDashboard&ym=<?= e($prevYm) ?>">←</a>
-    <h2><?= e($monthTitle) ?></h2>
-    <a class="btn" href="<?= BASE_URL ?>?action=coachDashboard&ym=<?= e($nextYm) ?>">→</a>
-  </div>
+  <h1>Bonjour <?= e($coachName) ?></h1>
+  <p>Nous sommes le <?= e($todayDate) ?></p>
+</section>
 
-  <div class="cal-grid cal-head">
-    <div>Lu</div><div>Ma</div><div>Me</div><div>Je</div><div>Ve</div><div>Sa</div><div>Di</div>
-  </div>
+<section class="card">
+  <form method="get" action="" class="form" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+    <input type="hidden" name="action" value="coachDashboard">
+    <label>
+      Sélectionner une date
+      <input type="date" name="date" value="<?= e($selectedDate) ?>" onchange="this.form.submit()">
+    </label>
 
-  <div class="cal-grid">
-    <?php for ($i=1; $i<$startDow; $i++): ?>
-      <div class="cal-day empty"></div>
-    <?php endfor; ?>
+    <label>
+      Adhérent
+      <select name="adherent" onchange="this.form.submit()">
+        <option value="">— Tous —</option>
+        <?php foreach ($adherents as $a): ?>
+          <option value="<?= (int)$a['id'] ?>" <?= $selectedAdh===(int)$a['id']?'selected':'' ?>>
+            <?= e($a['first_name'].' '.$a['last_name']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+  </form>
 
-    <?php for ($d=1; $d<=$daysInMonth; $d++): 
-      $day = sprintf('%s-%02d', $ym, $d);
-      $sum = $summary[$day] ?? ['total'=>0,'reserved'=>0];
-      $classes = ['cal-day'];
-      if ($day === $today) $classes[] = 'today';
-      if ($day === $selectedDate) $classes[] = 'selected';
-      if ($sum['total'] > 0) $classes[] = 'has-avail';
+  <?php if ($selectedAdh): ?>
+    <div style="margin-top:10px;">
+      <h3>Créneaux réservés par <?= e($adherents[array_search($selectedAdh, array_column($adherents,'id'))]['first_name'] ?? 'Adh') ?>
+          <?= e($adherents[array_search($selectedAdh, array_column($adherents,'id'))]['last_name']  ?? '') ?></h3>
+      <?php if (empty($reservedForAdh)): ?>
+        <p>Aucun créneau réservé.</p>
+      <?php else: ?>
+        <ul>
+        <?php foreach ($reservedForAdh as $rs): ?>
+          <li><?= e($rs['date']) ?> de <?= e($rs['start_time']) ?> à <?= e($rs['end_time']) ?></li>
+        <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+</section>
+
+<section class="card">
+  <h2>Créneaux du <?= e($selectedDate) ?></h2>
+
+  <div class="slots-container">
+    <?php if (empty($slots)): ?>
+      <p>Aucun créneau pour cette journée.</p>
+    <?php else: ?>
+      <?php foreach ($slots as $s):
+        $reserved = ((int)$s['reserved_count'] > 0);
+        $status = $s['status'];
+        $cls = $reserved ? 'reserved-slot' : ($status === 'blocked' ? 'unavailable-slot' : 'available-slot');
       ?>
-      <a class="<?= e(implode(' ', $classes)) ?>"
-         href="<?= BASE_URL ?>?action=coachDashboard&ym=<?= e($ym) ?>&date=<?= e($day) ?>">
-        <div class="cal-num"><?= $d ?></div>
-        <?php if ($sum['total'] > 0): ?>
-          <div class="cal-badges">
-            <span class="badge"><?= (int)$sum['total'] ?></span>
-            <?php if ($sum['reserved'] > 0): ?><span class="badge warn"><?= (int)$sum['reserved'] ?></span><?php endif; ?>
+        <div class="slot <?= e($cls) ?>">
+          <div class="slot-time"><?= e(timeHM($s['start_time'])) ?> - <?= e(timeHM($s['end_time'])) ?></div>
+          <div class="slot-actions">
+            <?php if (!$reserved): ?>
+              <?php if ($status === 'available'): ?>
+                <form class="inline" method="post" action="<?= BASE_URL ?>?action=creneauBlock">
+                  <?= csrf_input() ?>
+                  <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
+                  <input type="hidden" name="date" value="<?= e($selectedDate) ?>">
+                  <button class="btn" type="submit">Indisponible</button>
+                </form>
+              <?php elseif ($status === 'blocked'): ?>
+                <form class="inline" method="post" action="<?= BASE_URL ?>?action=creneauUnblock">
+                  <?= csrf_input() ?>
+                  <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
+                  <input type="hidden" name="date" value="<?= e($selectedDate) ?>">
+                  <button class="btn" type="submit">Disponible</button>
+                </form>
+              <?php endif; ?>
+
+              <form class="inline" method="post" action="<?= BASE_URL ?>?action=creneauDelete" onsubmit="return confirm('Supprimer ce créneau ?');">
+                <?= csrf_input() ?>
+                <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
+                <input type="hidden" name="date" value="<?= e($selectedDate) ?>">
+                <button class="btn" type="submit">Supprimer</button>
+              </form>
+
+              <form class="inline" method="post" action="<?= BASE_URL ?>?action=creneauReserveForAdherent">
+                <?= csrf_input() ?>
+                <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
+                <input type="hidden" name="date" value="<?= e($selectedDate) ?>">
+                <input type="hidden" name="adherent_id" value="<?= (int)$selectedAdh ?>">
+                <button class="btn btn-primary" type="submit" <?= $selectedAdh ? '' : 'disabled title="Sélectionne un adhérent"' ?>>
+                  Réserver pour l’adhérent
+                </button>
+              </form>
+            <?php else: ?>
+              <span class="badge warn">Réservé</span>
+            <?php endif; ?>
           </div>
-        <?php endif; ?>
-      </a>
-    <?php endfor; ?>
+        </div>
+      <?php endforeach; ?>
+    <?php endif; ?>
   </div>
 </section>
 
 <section class="card">
-  <h2>Créneaux du <?= e(dmy($selectedDate)) ?></h2>
-  <?php if (empty($slots)): ?>
-    <p>Aucun créneau pour ce jour (la grille 08:00→20:00 est générée automatiquement ; actualise si besoin).</p>
-  <?php else: ?>
-  <table class="table">
-    <thead><tr><th>Début</th><th>Fin</th><th>Statut</th><th>Réservé ?</th><th>Actions</th></tr></thead>
-    <tbody>
-    <?php foreach ($slots as $s): ?>
-      <tr>
-        <td><?= e(fdt($s['start_time'])) ?></td>
-        <td><?= e(fdt($s['end_time'])) ?></td>
-        <td>
-          <?php if ($s['status']==='available'): ?>
-            <span class="badge ok">Disponible</span>
-          <?php elseif ($s['status']==='blocked'): ?>
-            <span class="badge warn">Indisponible</span>
-          <?php else: ?>
-            <span class="badge">Supprimé</span>
-          <?php endif; ?>
-        </td>
-        <td><?= ((int)$s['reserved_count'] > 0) ? 'Oui' : 'Non' ?></td>
-        <td>
-          <?php if ((int)$s['reserved_count'] === 0): ?>
-            <?php if ($s['status']==='available'): ?>
-              <form method="post" action="<?= BASE_URL ?>?action=creneauBlock" class="inline">
-                <?= csrf_input() ?>
-                <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
-                <button class="btn" type="submit">Indispo</button>
-              </form>
-            <?php elseif ($s['status']==='blocked'): ?>
-              <form method="post" action="<?= BASE_URL ?>?action=creneauUnblock" class="inline">
-                <?= csrf_input() ?>
-                <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
-                <button class="btn" type="submit">Rendre dispo</button>
-              </form>
-            <?php endif; ?>
-
-            <form method="post" action="<?= BASE_URL ?>?action=creneauDelete" class="inline" onsubmit="return confirm('Supprimer ce créneau ?');">
-              <?= csrf_input() ?>
-              <input type="hidden" name="slot_id" value="<?= (int)$s['id'] ?>">
-              <button class="btn" type="submit">Supprimer</button>
-            </form>
-          <?php else: ?>
-            —
-          <?php endif; ?>
-        </td>
-      </tr>
-    <?php endforeach; ?>
-    </tbody>
-  </table>
-  <?php endif; ?>
-</section>
-
-<section class="card">
-  <h2>Réservations reçues (toutes)</h2>
-  <?php if (empty($reservations)): ?>
-    <p>Aucune réservation.</p>
-  <?php else: ?>
-  <table class="table">
-    <thead><tr><th>Début</th><th>Fin</th><th>Adhérent</th><th>Email</th><th>Statut</th></tr></thead>
-    <tbody>
-    <?php foreach ($reservations as $r): ?>
-      <tr>
-        <td><?= e(fdt($r['start_time'])) ?></td>
-        <td><?= e(fdt($r['end_time'])) ?></td>
-        <td><?= e($r['adh_first'].' '.$r['adh_last']) ?></td>
-        <td><?= e($r['email']) ?></td>
-        <td><?= e($r['status']) ?><?= ((int)$r['paid']===1?' (payé)':'') ?></td>
-      </tr>
-    <?php endforeach; ?>
-    </tbody>
-  </table>
-  <?php endif; ?>
+  <h2>Ajouter un créneau</h2>
+  <form method="post" action="<?= BASE_URL ?>?action=creneauAdd" class="form" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+    <?= csrf_input() ?>
+    <input type="hidden" name="date" value="<?= e($selectedDate) ?>">
+    <label>Début
+      <input type="time" name="start_time" required>
+    </label>
+    <label>Fin
+      <input type="time" name="end_time" required>
+    </label>
+    <div style="align-self:end">
+      <button class="btn btn-primary" type="submit">Ajouter</button>
+    </div>
+  </form>
 </section>

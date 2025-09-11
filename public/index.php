@@ -1,34 +1,24 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Front Controller — point d’entrée unique
- * - Charge la config (session, autoload, helpers, DB consts, BASE_URL)
- * - Lit ?action=...
- * - Protège les actions qui doivent être en POST
- * - Route vers le bon contrôleur
- */
-
-require __DIR__ . '/../config/config.php';
+require __DIR__ . '/../config/autoload.php'; // <-- autoload plan B
+require __DIR__ . '/../config/config.php';   // <-- ta config/boot app
 
 use App\controllers\HomeController;
 use App\controllers\AuthController;
 use App\controllers\DashboardController;
 use App\controllers\CreneauController;
 
-/* Action demandée (défaut = home) */
 $action = $_GET['action'] ?? 'home';
 
-/* Actions qui DOIVENT être appelées en POST */
 $mustBePost = [
-    'signupPost',
-    'loginPost',
-    'creneauAdd',
-    'creneauDelete',
-    'creneauReserve',
+    'signupPost','loginPost',
+    'creneauAdd','creneauDelete','creneauReserve',
+    'creneauBlock','creneauUnblock','creneauReserveForAdherent',
+    'reservationCancel',       // adhérent
+    'reservationCancelByCoach' // coach
 ];
 
-/* Méthode incorrecte → 405 */
 if (in_array($action, $mustBePost, true) && ($_SERVER['REQUEST_METHOD'] !== 'POST')) {
     http_response_code(405);
     header('Allow: POST');
@@ -38,66 +28,35 @@ if (in_array($action, $mustBePost, true) && ($_SERVER['REQUEST_METHOD'] !== 'POS
 
 try {
     switch ($action) {
-        /* --------- Pages publiques --------- */
-        case 'home':
-            (new HomeController())->index();
-            break;
+        case 'home':           (new HomeController())->index(); break;
 
-        /* --------- Authentification --------- */
-        case 'inscription':
-            (new AuthController())->signupForm();
-            break;
+        // Auth
+        case 'inscription':    (new AuthController())->signupForm(); break;
+        case 'signupPost':     (new AuthController())->signupPost(); break;
+        case 'connexion':      (new AuthController())->loginForm(); break;
+        case 'loginPost':      (new AuthController())->loginPost(); break;
+        case 'logout':         (new AuthController())->logout(); break;
 
-        case 'signupPost': // POST
-            (new AuthController())->signupPost();
-            break;
+        // Dashboards
+        case 'adherentDashboard': (new DashboardController())->adherent(); break;
+        case 'coachDashboard':    (new DashboardController())->coach(); break;
 
-        case 'connexion':
-            (new AuthController())->loginForm();
-            break;
+        // Slots & Reservations
+        case 'creneauAdd':                (new CreneauController())->add(); break;
+        case 'creneauDelete':             (new CreneauController())->delete(); break;
+        case 'creneauReserve':            (new CreneauController())->reserve(); break;
+        case 'creneauBlock':              (new CreneauController())->block(); break;
+        case 'creneauUnblock':            (new CreneauController())->unblock(); break;
+        case 'creneauReserveForAdherent': (new CreneauController())->reserveForAdherent(); break;
+        case 'reservationCancel':         (new CreneauController())->cancelReservation(); break;     // adhérent
+        case 'reservationCancelByCoach':  (new CreneauController())->cancelByCoach(); break;        // coach
 
-        case 'loginPost':  // POST
-            (new AuthController())->loginPost();
-            break;
-
-        case 'logout':
-            (new AuthController())->logout();
-            break;
-
-        /* --------- Dashboards --------- */
-        case 'adherentDashboard':
-            (new DashboardController())->adherent();
-            break;
-
-        case 'coachDashboard':
-            (new DashboardController())->coach();
-            break;
-
-        /* --------- Créneaux --------- */
-        case 'creneauAdd':     // POST (coach)
-            (new CreneauController())->add();
-            break;
-
-        case 'creneauDelete':  // POST (coach)
-            (new CreneauController())->delete();
-            break;
-
-        case 'creneauReserve': // POST (adhérent)
-            (new CreneauController())->reserve();
-            break;
-
-        /* --------- 404 --------- */
         default:
             http_response_code(404);
             (new HomeController())->notFound();
     }
-
 } catch (Throwable $e) {
-    // En dev on laisse remonter l’exception pour debug
-    if (defined('IN_DEV') && IN_DEV) {
-        throw $e;
-    }
-    // En prod : page 500 propre
+    if (defined('IN_DEV') && IN_DEV) throw $e;
     http_response_code(500);
     (new HomeController())->error($e);
 }

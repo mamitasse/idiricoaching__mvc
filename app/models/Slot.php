@@ -19,19 +19,21 @@ final class Slot extends Model
     }
 
     public function deleteIfFree(int $coachId, int $slotId): bool {
+        // Libre = aucune résa ACTIVE (status <> cancelled)
         $sql = "DELETE s FROM slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                     ON r.slot_id = s.id AND r.status <> 'cancelled'
                 WHERE s.id = :id AND s.coach_id = :coach AND r.id IS NULL";
         $stmt = $this->db()->prepare($sql);
         $stmt->execute(['id'=>$slotId,'coach'=>$coachId]);
         return $stmt->rowCount() > 0;
     }
 
-    /** status: 'available' | 'blocked' (uniquement si non réservé) */
     public function setStatusIfFree(int $coachId, int $slotId, string $status): bool {
         $status = ($status === 'blocked') ? 'blocked' : 'available';
         $sql = "UPDATE slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                     ON r.slot_id = s.id AND r.status <> 'cancelled'
                 SET s.status = :status
                 WHERE s.id = :id AND s.coach_id = :coach AND r.id IS NULL";
         $stmt = $this->db()->prepare($sql);
@@ -39,10 +41,10 @@ final class Slot extends Model
         return $stmt->rowCount() > 0;
     }
 
-    /** Tous les créneaux d’un coach, avec indicateur de réservation */
     public function coachSlotsWithStatus(int $coachId): array {
         $sql = "SELECT s.*,
-                       (SELECT COUNT(*) FROM reservations r WHERE r.slot_id=s.id) AS reserved_count
+                       (SELECT COUNT(*) FROM reservations r
+                         WHERE r.slot_id=s.id AND r.status <> 'cancelled') AS reserved_count
                 FROM slots s
                 WHERE s.coach_id = :coach
                 ORDER BY s.start_time ASC";
@@ -51,11 +53,12 @@ final class Slot extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** Créneaux disponibles pour un coach (tous jours) */
+    /** Tous les créneaux disponibles (futurs) pour un coach */
     public function availableForCoach(int $coachId): array {
         $sql = "SELECT s.*
                 FROM slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                       ON r.slot_id = s.id AND r.status <> 'cancelled'
                 WHERE s.coach_id = :coach
                   AND s.status = 'available'
                   AND r.id IS NULL
@@ -66,11 +69,12 @@ final class Slot extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** Créneaux disponibles pour un coach sur une date YYYY-MM-DD */
+    /** Dispos d’un coach sur une journée YYYY-MM-DD */
     public function availableByDayForCoach(int $coachId, string $dateYmd): array {
         $sql = "SELECT s.*
                 FROM slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                       ON r.slot_id = s.id AND r.status <> 'cancelled'
                 WHERE s.coach_id = :coach
                   AND DATE(s.start_time) = :d
                   AND s.status = 'available'
@@ -81,10 +85,11 @@ final class Slot extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** Tous les créneaux d’un coach sur une date YYYY-MM-DD (avec reserved_count) */
+    /** Tous les créneaux d’un jour (avec info réservation ACTIVE) */
     public function daySlotsForCoach(int $coachId, string $dateYmd): array {
         $sql = "SELECT s.*,
-                       (SELECT COUNT(*) FROM reservations r WHERE r.slot_id=s.id) AS reserved_count
+                       (SELECT COUNT(*) FROM reservations r
+                         WHERE r.slot_id=s.id AND r.status <> 'cancelled') AS reserved_count
                 FROM slots s
                 WHERE s.coach_id = :coach
                   AND DATE(s.start_time) = :d
@@ -94,7 +99,7 @@ final class Slot extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** Carte des disponibilités par jour pour un mois (YYYY-MM => 'YYYY-MM-DD' => nb disponibles) */
+    /** Carte des dispos par jour pour un mois (YYYY-MM) */
     public function monthAvailabilityMap(int $coachId, string $ym): array {
         $start = new DateTime($ym . '-01 00:00:00');
         $end   = (clone $start)->modify('first day of next month 00:00:00');
@@ -102,7 +107,8 @@ final class Slot extends Model
         $sql = "SELECT DATE(s.start_time) AS d, 
                        SUM(CASE WHEN s.status='available' AND r.id IS NULL THEN 1 ELSE 0 END) AS cnt
                 FROM slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                       ON r.slot_id = s.id AND r.status <> 'cancelled'
                 WHERE s.coach_id = :coach
                   AND s.start_time >= :start
                   AND s.start_time < :end
@@ -115,13 +121,11 @@ final class Slot extends Model
         ]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $map = [];
-        foreach ($rows as $r) {
-            $map[$r['d']] = (int)$r['cnt'];
-        }
+        foreach ($rows as $r) $map[$r['d']] = (int)$r['cnt'];
         return $map;
     }
 
-    /** Carte des totaux par jour pour un mois (total vs réservés) */
+    /** Totaux (tous / réservés ACTIFS) par jour pour un mois (coach) */
     public function monthSlotsSummaryMap(int $coachId, string $ym): array {
         $start = new DateTime($ym . '-01 00:00:00');
         $end   = (clone $start)->modify('first day of next month 00:00:00');
@@ -130,7 +134,8 @@ final class Slot extends Model
                        COUNT(*) AS total,
                        SUM(CASE WHEN r.id IS NOT NULL THEN 1 ELSE 0 END) AS reserved
                 FROM slots s
-                LEFT JOIN reservations r ON r.slot_id = s.id
+                LEFT JOIN reservations r
+                       ON r.slot_id = s.id AND r.status <> 'cancelled'
                 WHERE s.coach_id = :coach
                   AND s.start_time >= :start
                   AND s.start_time < :end
@@ -169,13 +174,11 @@ final class Slot extends Model
         return (int)$stmt->fetchColumn() > 0;
     }
 
-    /** Auto-génère 08:00→20:00 par pas d’1h pour les N prochains jours (conservé) */
-    public function ensureGridNextDays(int $coachId, int $days = 14, int $startHour = 8, int $endHour = 20): int
-    {
+    /** Génération jour/mois (déjà implémentées) */
+    public function ensureGridNextDays(int $coachId, int $days = 14, int $startHour = 8, int $endHour = 20): int {
         $created = 0;
         $today = new DateTime('today');
         $oneHour = new DateInterval('PT1H');
-
         for ($d = 0; $d < $days; $d++) {
             $day = (clone $today)->add(new DateInterval('P' . $d . 'D'));
             for ($h = $startHour; $h < $endHour; $h++) {
@@ -195,14 +198,11 @@ final class Slot extends Model
         return $created;
     }
 
-    /** Auto-génère 08:00→20:00 pour tout le mois donné (YYYY, MM) */
-    public function ensureMonthGrid(int $coachId, int $year, int $month, int $startHour = 8, int $endHour = 20): int
-    {
+    public function ensureMonthGrid(int $coachId, int $year, int $month, int $startHour = 8, int $endHour = 20): int {
         $created = 0;
         $first = new DateTime(sprintf('%04d-%02d-01 00:00:00', $year, $month));
         $days = (int)$first->format('t');
         $oneHour = new DateInterval('PT1H');
-
         for ($d = 1; $d <= $days; $d++) {
             $day = (clone $first)->setDate((int)$first->format('Y'), (int)$first->format('m'), $d);
             for ($h = $startHour; $h < $endHour; $h++) {

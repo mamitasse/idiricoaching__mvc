@@ -11,7 +11,7 @@ use DateTime;
 
 final class DashboardController extends Controller
 {
-    /** Adhérent : calendrier + créneaux du jour (coach choisi) */
+    /** Tableau de bord ADHÉRENT — style “React-like” (date picker + cartes de créneaux) */
     public function adherent(): void
     {
         if (empty($_SESSION['user']) || (($_SESSION['user']['role'] ?? '') !== 'adherent')) {
@@ -19,63 +19,56 @@ final class DashboardController extends Controller
             $this->redirect(BASE_URL.'?action=connexion');
         }
 
-        $user = $_SESSION['user'];
-        $coachId = (int)($user['coach_id'] ?? 0);
+        $adh = $_SESSION['user'];
+        $coachId = (int)($adh['coach_id'] ?? 0);
         if ($coachId <= 0) {
             flash('error','Aucun coach associé à ton compte.');
             $this->redirect(BASE_URL.'?action=home');
         }
 
-        // Lecture des paramètres de navigation calendrier
-        $ym = $_GET['ym'] ?? date('Y-m');
-        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $ym)) {
-            $ym = date('Y-m');
-        }
-        [$year, $month] = array_map('intval', explode('-', $ym));
-
-        // Date sélectionnée (par défaut aujourd’hui si même mois, sinon 1er du mois)
-        $selectedDate = $_GET['date'] ?? null;
-        $today = (new DateTime('today'))->format('Y-m-d');
-        if (!$selectedDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || substr($selectedDate, 0, 7) !== $ym) {
-            $selectedDate = (substr($today, 0, 7) === $ym) ? $today : sprintf('%s-01', $ym);
+        // Date sélectionnée (YYYY-MM-DD)
+        $selectedDate = $_GET['date'] ?? (new DateTime('today'))->format('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+            $selectedDate = (new DateTime('today'))->format('Y-m-d');
         }
 
+        // Auto-génère la grille du MOIS de la date sélectionnée (08h→20h, pas 1h)
+        [$y,$m] = array_map('intval', explode('-', substr($selectedDate,0,7)));
         $slotM = new Slot();
-        // Auto-génère toute la grille du mois 08:00→20:00
-        $slotM->ensureMonthGrid($coachId, $year, $month, 8, 20);
+        $slotM->ensureMonthGrid($coachId, $y, $m, 8, 20);
 
-        // Carte des jours avec nb de créneaux disponibles
-        $availMap = $slotM->monthAvailabilityMap($coachId, $ym);
+        // Créneaux disponibles pour ce jour chez SON coach
+        $available = $slotM->availableByDayForCoach($coachId, $selectedDate);
 
-        // Créneaux disponibles du jour sélectionné
-        $dayAvail = $slotM->availableByDayForCoach($coachId, $selectedDate);
+        // Optionnel : si on est le jour même, on peut filtrer les créneaux déjà passés
+        $today = (new DateTime('today'))->format('Y-m-d');
+        if ($selectedDate === $today) {
+            $now = new DateTime();
+            $available = array_values(array_filter($available, function(array $s) use ($now) {
+                return (new DateTime($s['start_time'])) >= $now;
+            }));
+        }
 
-        // Mes réservations (historique)
+        // Mes réservations (historique + futur)
         $resM = new Reservation();
-        $myRes = $resM->forAdherent((int)$user['id']);
+        $myReservations = $resM->forAdherent((int)$adh['id']);
 
+        // Infos coach + header
         $u = new User();
         $coach = $u->getById($coachId);
 
-        // Navigation mois précédent / suivant
-        $cur = new DateTime($ym . '-01');
-        $prevYm = $cur->modify('-1 month')->format('Y-m');
-        $nextYm = $cur->modify('+2 month')->format('Y-m'); // (on a fait -1 puis +2 => +1 net)
-
         $this->render('dashboard/adherent', [
             'title'         => 'Mon tableau de bord — Adhérent',
-            'ym'            => $ym,
-            'prevYm'        => $prevYm,
-            'nextYm'        => $nextYm,
+            'userName'      => $adh['first_name'].' '.$adh['last_name'],
+            'coachName'     => $coach ? ($coach['first_name'].' '.$coach['last_name']) : '—',
+            'todayDate'     => (new DateTime('today'))->format('d/m/Y'),
             'selectedDate'  => $selectedDate,
-            'availability'  => $availMap,
-            'availableSlots'=> $dayAvail,
-            'reservations'  => $myRes,
-            'coach'         => $coach,
+            'availableSlots'=> $available,
+            'reservations'  => $myReservations,
         ]);
     }
 
-    /** Coach : calendrier + créneaux du jour (gérer dispo/suppression) */
+    /** Tableau de bord COACH — style “React-like” (déjà fourni précédemment) */
     public function coach(): void
     {
         if (empty($_SESSION['user']) || (($_SESSION['user']['role'] ?? '') !== 'coach')) {
@@ -84,48 +77,48 @@ final class DashboardController extends Controller
         }
 
         $coach = $_SESSION['user'];
+        $coachId = (int)$coach['id'];
 
-        // Lecture des paramètres calendrier
-        $ym = $_GET['ym'] ?? date('Y-m');
-        if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $ym)) {
-            $ym = date('Y-m');
+        // Paramètres UI
+        $selectedDate = $_GET['date'] ?? (new DateTime('today'))->format('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+            $selectedDate = (new DateTime('today'))->format('Y-m-d');
         }
-        [$year, $month] = array_map('intval', explode('-', $ym));
+        $selectedAdherent = isset($_GET['adherent']) && ctype_digit($_GET['adherent']) ? (int)$_GET['adherent'] : 0;
 
-        $selectedDate = $_GET['date'] ?? null;
-        $today = (new DateTime('today'))->format('Y-m-d');
-        if (!$selectedDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || substr($selectedDate, 0, 7) !== $ym) {
-            $selectedDate = (substr($today, 0, 7) === $ym) ? $today : sprintf('%s-01', $ym);
-        }
-
+        // Auto-génère la grille du mois de la date sélectionnée
+        [$y,$m] = array_map('intval', explode('-', substr($selectedDate,0,7)));
         $slotM = new Slot();
-        // Auto-génère la grille du mois
-        $slotM->ensureMonthGrid((int)$coach['id'], $year, $month, 8, 20);
-
-        // Résumé des slots par jour pour le calendrier (total & réservés)
-        $summaryMap = $slotM->monthSlotsSummaryMap((int)$coach['id'], $ym);
+        $slotM->ensureMonthGrid($coachId, $y, $m, 8, 20);
 
         // Créneaux du jour
-        $daySlots = $slotM->daySlotsForCoach((int)$coach['id'], $selectedDate);
+        $daySlots = $slotM->daySlotsForCoach($coachId, $selectedDate);
 
-        // Réservations reçues (liste globale — tu peux filtrer par jour plus tard si tu veux)
+        // Adhérents rattachés
+        $u = new User();
+        $adherents = $u->adherentsOfCoach($coachId);
+
+        // Réservations
         $resM = new Reservation();
-        $reservations = $resM->forCoach((int)$coach['id']);
+        $reservations = $resM->forCoach($coachId);
+        $reservedSlotsForAdh = [];
+        if ($selectedAdherent > 0) {
+            $reservedSlotsForAdh = $resM->reservedSlotsForAdherent($coachId, $selectedAdherent);
+        }
 
-        // Nav mois
-        $cur = new DateTime($ym . '-01');
-        $prevYm = $cur->modify('-1 month')->format('Y-m');
-        $nextYm = $cur->modify('+2 month')->format('Y-m');
+        $coachName = $coach['first_name'].' '.$coach['last_name'];
+        $todayDate = (new DateTime('today'))->format('d/m/Y');
 
         $this->render('dashboard/coach', [
-            'title'        => 'Mon tableau de bord — Coach',
-            'ym'           => $ym,
-            'prevYm'       => $prevYm,
-            'nextYm'       => $nextYm,
-            'selectedDate' => $selectedDate,
-            'summary'      => $summaryMap,
-            'slots'        => $daySlots,
-            'reservations' => $reservations,
+            'title'          => 'Mon tableau de bord — Coach',
+            'coachName'      => $coachName,
+            'todayDate'      => $todayDate,
+            'selectedDate'   => $selectedDate,
+            'adherents'      => $adherents,
+            'selectedAdh'    => $selectedAdherent,
+            'slots'          => $daySlots,
+            'reservedForAdh' => $reservedSlotsForAdh,
+            'reservations'   => $reservations,
         ]);
     }
 }

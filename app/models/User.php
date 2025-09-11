@@ -42,6 +42,17 @@ final class User extends Model
         return $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function adherentsOfCoach(int $coachId): array {
+        $stmt = $this->db()->prepare("
+            SELECT id, first_name, last_name, email
+            FROM users
+            WHERE role='adherent' AND coach_id=:coach
+            ORDER BY last_name, first_name
+        ");
+        $stmt->execute(['coach'=>$coachId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function getById(int $id): ?array {
         $stmt = $this->db()->prepare("SELECT * FROM users WHERE id = :id");
         $stmt->execute(['id'=>$id]);

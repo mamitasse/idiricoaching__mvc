@@ -38,47 +38,34 @@ body { margin:0; font-family: system-ui, Arial, sans-serif; color: var(--text); 
 .badge.ok { background:#2e7d32; }
 .badge.warn { background:#a5670a; }
 
-/* Calendar */
-.cal-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.cal-header h2 { margin: 0; }
-
-.cal-grid { 
-  display:grid; 
-  grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  margin-top: 10px;
-}
-.cal-head { font-weight: 700; color: var(--muted); }
-.cal-head > div { text-align:center; padding: 6px; }
-
-.cal-day {
-  background:#3a2e2e; 
-  border-radius:8px; 
-  min-height: 70px; 
-  padding:6px; 
-  position:relative; 
-  text-decoration:none; 
-  color:#fff;
-  border:1px solid transparent;
-}
-.cal-day:hover { border-color:#7a5b5b; }
-.cal-day.empty { background: transparent; border:0; pointer-events:none; }
-
-.cal-day .cal-num { font-weight:700; opacity:.9; }
-.cal-day.today { outline:2px dashed #b67a7a; }
-.cal-day.selected { box-shadow:0 0 0 2px #b67a7a inset; }
-.cal-day.has-avail { background:#3e3434; }
-
-.cal-dot {
-  width:8px; height:8px; border-radius:50%; background:#2e7d32;
-  position:absolute; right:8px; bottom:8px;
-}
-.cal-badges { position:absolute; right:6px; bottom:6px; display:flex; gap:4px; }
-
-/* Cards on home (if used) */
+/* Home cards (si utilisées) */
 .hero { text-align:center; margin-bottom:24px; }
 .subtitle { color: var(--muted); }
 .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap:20px; }
 .card h2 { margin:0 0 12px; }
 .card-placeholder { height:180px; border-radius:8px; background:#3a2e2e; display:flex; align-items:center; justify-content:center; color:#bfa; }
 .card-actions { margin-top:12px; display:flex; gap:8px; }
+
+/* Slots "look React" */
+.slots-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.slot {
+  border-radius: 10px;
+  padding: 12px;
+  background: #3a2e2e;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.slot .slot-time {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.slot .slot-actions form { margin-right: 6px; }
+.slot .slot-actions .btn { margin-top: 6px; }
+
+.available-slot { border: 1px solid #2e7d32; }
+.unavailable-slot { border: 1px solid #a5670a; opacity:.85; }
+.reserved-slot { border: 1px solid #7a3434; background: #4a2e2e; }
